@@ -135,7 +135,7 @@ def main():
     stats, mx = bh.render(
         runs, per_bucket, tracks, a.theme, a.out, a.grid,
         (bh.GLOW_WIDTH, bh.GLOW_OPACITY, bh.CORE_WIDTH, bh.CORE_LIGHTEN),
-        div, base, a.period)
+        div, base)
     print(f"{stats['trips']:,} rides · {stats['stretches']:,} stretches of road · "
           f"busiest one ridden {mx:,} times")
 
