@@ -5,8 +5,8 @@ ever recorded, built from your own data and rendered as a single self-contained
 HTML file.
 
 
-<p align="center">
-<img width="478" height="375" alt="map" src="https://github.com/user-attachments/assets/9ccb377a-3c46-4ddb-b451-8ffc0c43f302" /> </p>
+<p align="center"> <img width="580" height="456" alt="map" src="https://github.com/user-attachments/assets/62a4bea9-4c89-4d48-9b2f-3513819511ac" />
+ </p>
 
 
 Brighter and thicker means more separate trips down that stretch of road. The
