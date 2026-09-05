@@ -51,6 +51,19 @@ GLOW_OPACITY = 0.22     # halo opacity at full brightness
 CORE_WIDTH = 2.6        # how much the core thickens from quiet to busy
 CORE_LIGHTEN = 0.45     # how far the core is pushed toward white
 
+# Flow. A third pass of short bright dashes that crawl along each path, so the
+# map reads as motion rather than as a still exposure. Runs are stored in the
+# direction the ride was actually made (build_runs emits them along the trip
+# that first claimed the stretch), so the dashes travel the way the bike went.
+FLOW_WIDTH = 2.5        # constant px: dash lengths count in line widths, and a
+                        # data-driven width would size every road's dash apart
+FLOW_DASH = 0.3        # dash length, in line widths
+FLOW_GAP = 11.0         # gap between dashes, same units
+FLOW_MS = 1500           # milliseconds for a dash to travel one whole cycle:
+                        # (dash + gap) * width / ms ~ 27 px/s, a walking pace
+                        # that reads as travel without turning into a strobe
+FLOW_STEPS = 22         # phases per cycle; each is one paint-property write
+
 THEMES = {
     # Strava-style: crimson capillaries -> orange -> white-hot, over navy.
     "strava": {
@@ -297,6 +310,8 @@ def render(runs, per_month, tracks, theme, out, grid_m, glow, div, base):
                              reverse=True)[max(0, int(len(per_month) * .01))], 2),
         "trips": len(tracks),
         "glowW": glow[0], "glowO": glow[1], "coreW": glow[2], "coreLite": glow[3],
+        "flowW": FLOW_WIDTH, "flowDash": FLOW_DASH, "flowGap": FLOW_GAP,
+        "flowMs": FLOW_MS, "flowSteps": FLOW_STEPS,
     }
     mx_count = max(sum(v.values()) for v in per_month.values())
     Path(out).write_text(TEMPLATE.format(
@@ -387,7 +402,8 @@ TEMPLATE = """<!doctype html>
     separate trips down that stretch.</div>
   <div class="legend"><span class="lab">1</span><span class="bar"></span><span class="lab" id="capLab"></span></div>
   <div class="foot">{stretches} STRETCHES · MAX {mx} TRIPS</div>
-  <div class="foot acts"><a id="fitall">FIT ALL</a> · <a id="export">EXPORT PNG</a></div>
+  <div class="foot acts"><a id="fitall">FIT ALL</a> · <a id="export">EXPORT PNG</a>
+    · <a id="flow">FLOW ON</a></div>
   <div class="dates">
     <div class="drow"><b id="dRange"></b><span id="dTrips"></span></div>
     <div class="dbtns">
@@ -401,6 +417,26 @@ TEMPLATE = """<!doctype html>
 <script>
 const D = {payload};
 const S = D.scale, G = {{ w: D.glowW, o: D.glowO, core: D.coreW, lite: D.coreLite }};
+const F = {{ w: D.flowW, dash: D.flowDash, gap: D.flowGap,
+            ms: D.flowMs, steps: D.flowSteps }};
+
+// Dash phases, precomputed once. line-dasharray is measured in line widths and
+// takes only constants — no expression, so no per-vertex attribute is rebuilt
+// when it changes, which is what makes animating it cheap at this many paths.
+// A phase u ships as [0, u, dash, gap - u]: a zero-length dash, then a gap that
+// pushes the real dash u along. Past u = gap the dash straddles the end of the
+// pattern, so it goes out as its tail, the gap, then its head — the head joins
+// the next repetition's tail across the trailing zero gap and reads as one dash.
+const PHASES = (() => {{
+  const P = F.dash + F.gap, out = [];
+  for (let i = 0; i < F.steps; i++) {{
+    const u = P * i / F.steps;
+    out.push(u === 0 ? [F.dash, F.gap]
+           : u <= F.gap ? [0, u, F.dash, F.gap - u]
+           : [u + F.dash - P, F.gap, P - u, 0]);
+  }}
+  return out;
+}})();
 const MONTHS = ['January','February','March','April','May','June','July',
                 'August','September','October','November','December'];
 // NB: this template is rendered with str.format(), which escapes braces but
@@ -514,6 +550,10 @@ function apply() {{
     map.setPaintProperty('core', 'line-color',
       colorExpr(v, shown, G.lite, 0.55, 1.0));
     map.setPaintProperty('core', 'line-width', ['+', 0.65, ['*', v, G.core]]);
+    // Near-white dashes, faint on a road ridden once and hot on the commute,
+    // so the flow picks out the busy lines instead of speckling everything.
+    map.setPaintProperty('flow', 'line-color',
+      colorExpr(v, shown, 0.75, 0.20, 0.95));
   }}
   let n = 0;
   for (let i = a; i <= b; i++) n += D.tpb[i];
@@ -521,6 +561,35 @@ function apply() {{
   document.getElementById('dTrips').textContent = n.toLocaleString() + ' TRIPS';
   document.getElementById('capLab').textContent = capFor(a, b) + '+';
 }}
+
+// Motion is opt-out: the whole point of the layer is that it moves, but a
+// reader who has asked the OS for less of it should not have to.
+let flowOn = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+let flowRAF = 0, flowStep = -1;
+const flowLink = document.getElementById('flow');
+
+// One paint write per phase rather than per frame: at a couple of dozen phases
+// a cycle the motion is already continuous, and each write re-renders every
+// visible path.
+function flowTick(t) {{
+  flowRAF = requestAnimationFrame(flowTick);
+  const i = Math.floor(t % F.ms / F.ms * F.steps) % F.steps;
+  if (i === flowStep || !map.getLayer('flow')) return;
+  flowStep = i;
+  map.setPaintProperty('flow', 'line-dasharray', PHASES[i]);
+}}
+
+// A hidden tab stops firing rAF on its own, so the loop parks itself whenever
+// the page is not on screen — nothing else to unwind.
+function setFlow(on) {{
+  flowOn = on;
+  flowLink.textContent = on ? 'FLOW ON' : 'FLOW OFF';
+  if (map.getLayer('flow'))
+    map.setLayoutProperty('flow', 'visibility', on ? 'visible' : 'none');
+  if (on && !flowRAF) flowRAF = requestAnimationFrame(flowTick);
+  if (!on && flowRAF) {{ cancelAnimationFrame(flowRAF); flowRAF = 0; flowStep = -1; }}
+}}
+flowLink.onclick = () => setFlow(!flowOn);
 
 map.on('load', () => {{
   // The dark basemap stamps a oneway arrow along every one-way street; at high
@@ -537,7 +606,17 @@ map.on('load', () => {{
     paint: {{ 'line-width': hw, 'line-blur': hw * 0.6 }} }});
   map.addLayer({{ id: 'core', type: 'line', source: 'rides',
     layout: {{ 'line-cap': 'round', 'line-join': 'round' }} }});
+  // On top of the core, and deliberately a constant width: a dash is a multiple
+  // of the line's own width, so the data-driven core width would make a busy
+  // road's dashes five times longer than a quiet one's and the whole field
+  // would crawl at different speeds. Round caps round the dashes into comets.
+  map.addLayer({{ id: 'flow', type: 'line', source: 'rides',
+    layout: {{ 'line-cap': 'round', 'line-join': 'round',
+              visibility: flowOn ? 'visible' : 'none' }},
+    paint: {{ 'line-width': F.w, 'line-blur': F.w * 0.5,
+             'line-dasharray': PHASES[0] }} }});
   apply();
+  setFlow(flowOn);
 
   const tip = document.getElementById('tip');
   map.on('mousemove', e => {{
@@ -630,9 +709,14 @@ function exportPNG() {{
                          'width:' + w + 'px;height:' + h + 'px';
   document.body.appendChild(holder);
 
+  // The flow layer only means anything in motion; frozen into a still it is
+  // just a dashed line laid over the picture, so the shot renders without it.
+  const style = map.getStyle();
+  style.layers = style.layers.filter(l => l.id !== 'flow');
+
   const shot = new maplibregl.Map({{
     container: holder,
-    style: map.getStyle(),
+    style: style,
     center: map.getCenter(), zoom: map.getZoom(),
     bearing: map.getBearing(), pitch: map.getPitch(),
     pixelRatio: ratio, maxCanvasSize: [EXP_MAX, EXP_MAX],

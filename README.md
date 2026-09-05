@@ -36,6 +36,12 @@ python3 make_heatmap.py --grid 5              # finer detail (heavier file)
 python3 make_heatmap.py --grid 20             # coarser, lighter
 ```
 
+The lines carry a **flow** overlay: bright dashes crawling along each stretch in
+the direction the ride was actually made. Toggle it with FLOW ON/OFF in the
+panel — it repaints continuously, so turn it off on a laptop running on battery.
+It starts off if your system asks for reduced motion, and it is left out of the
+exported PNG, where a frozen dash pattern would only read as a dashed line.
+
 `--grid` is the main dial. It sets how finely GPS points are bucketed when
 counting. Below about 20 m the grid gets finer than urban GPS error, so repeated
 passes down one street stop sharing a cell and the road smears into parallel
